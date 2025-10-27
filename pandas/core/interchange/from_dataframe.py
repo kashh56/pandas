@@ -12,6 +12,7 @@ import numpy as np
 from pandas._config import using_string_dtype
 
 from pandas.compat._optional import import_optional_dependency
+from pandas.util._decorators import set_module
 
 import pandas as pd
 from pandas.core.interchange.dataframe_protocol import (
@@ -34,6 +35,7 @@ _NP_DTYPES: dict[DtypeKind, dict[int, Any]] = {
 }
 
 
+@set_module("pandas.api.interchange")
 def from_dataframe(df, allow_copy: bool = True) -> pd.DataFrame:
     """
     Build a ``pd.DataFrame`` from any DataFrame supporting the interchange protocol.
@@ -41,7 +43,9 @@ def from_dataframe(df, allow_copy: bool = True) -> pd.DataFrame:
     .. note::
 
        For new development, we highly recommend using the Arrow C Data Interface
-       alongside the Arrow PyCapsule Interface instead of the interchange protocol
+       alongside the Arrow PyCapsule Interface instead of the interchange protocol.
+       From pandas 3.0 onwards, `from_dataframe` uses the PyCapsule Interface,
+       only falling back to the interchange protocol if that fails.
 
     .. warning::
 
@@ -75,7 +79,7 @@ def from_dataframe(df, allow_copy: bool = True) -> pd.DataFrame:
     >>> df_not_necessarily_pandas = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
     >>> interchange_object = df_not_necessarily_pandas.__dataframe__()
     >>> interchange_object.column_names()
-    Index(['A', 'B'], dtype='object')
+    Index(['A', 'B'], dtype='str')
     >>> df_pandas = pd.api.interchange.from_dataframe(
     ...     interchange_object.select_columns_by_name(["A"])
     ... )
@@ -89,6 +93,18 @@ def from_dataframe(df, allow_copy: bool = True) -> pd.DataFrame:
     """
     if isinstance(df, pd.DataFrame):
         return df
+
+    if hasattr(df, "__arrow_c_stream__"):
+        try:
+            pa = import_optional_dependency("pyarrow", min_version="14.0.0")
+        except ImportError:
+            # fallback to _from_dataframe
+            pass
+        else:
+            try:
+                return pa.table(df).to_pandas(zero_copy_only=not allow_copy)
+            except pa.ArrowInvalid as e:
+                raise RuntimeError(e) from e
 
     if not hasattr(df, "__dataframe__"):
         raise ValueError("`df` does not support __dataframe__")
@@ -549,7 +565,6 @@ def set_nulls(
     if null_kind == ColumnNullType.USE_SENTINEL:
         null_pos = pd.Series(data) == sentinel_val
     elif null_kind in (ColumnNullType.USE_BITMASK, ColumnNullType.USE_BYTEMASK):
-        assert validity, "Expected to have a validity buffer for the mask"
         valid_buff, valid_dtype = validity
         null_pos = buffer_to_ndarray(
             valid_buff, valid_dtype, offset=col.offset, length=col.size()

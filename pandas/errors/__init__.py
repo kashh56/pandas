@@ -4,11 +4,13 @@ Expose public exceptions & warnings
 
 from __future__ import annotations
 
+import abc
 import ctypes
 
 from pandas._config.config import OptionError
 
 from pandas._libs.tslibs import (
+    IncompatibleFrequency,
     OutOfBoundsDatetime,
     OutOfBoundsTimedelta,
 )
@@ -89,6 +91,138 @@ class PerformanceWarning(Warning):
     jim  joe
     1    z        3
     """
+
+
+class PandasChangeWarning(Warning):
+    """
+    Warning raised for any upcoming change.
+
+    See Also
+    --------
+    errors.PandasPendingDeprecationWarning : Class for deprecations that will raise a
+        PendingDeprecationWarning.
+    errors.PandasDeprecationWarning : Class for deprecations that will raise a
+        DeprecationWarning.
+    errors.PandasFutureWarning : Class for deprecations that will raise a FutureWarning.
+
+    Examples
+    --------
+    >>> pd.errors.PandasChangeWarning
+    <class 'pandas.errors.PandasChangeWarning'>
+    """
+
+    @classmethod
+    @abc.abstractmethod
+    def version(cls) -> str:
+        """Version where change will be enforced."""
+
+
+class PandasPendingDeprecationWarning(PandasChangeWarning, PendingDeprecationWarning):
+    """
+    Warning raised for an upcoming change that is a PendingDeprecationWarning.
+
+    See Also
+    --------
+    errors.PandasChangeWarning: Class for deprecations that will raise any warning.
+    errors.PandasDeprecationWarning : Class for deprecations that will raise a
+        DeprecationWarning.
+    errors.PandasFutureWarning : Class for deprecations that will raise a FutureWarning.
+
+    Examples
+    --------
+    >>> pd.errors.PandasPendingDeprecationWarning
+    <class 'pandas.errors.PandasPendingDeprecationWarning'>
+    """
+
+
+class PandasDeprecationWarning(PandasChangeWarning, DeprecationWarning):
+    """
+    Warning raised for an upcoming change that is a DeprecationWarning.
+
+    See Also
+    --------
+    errors.PandasChangeWarning: Class for deprecations that will raise any warning.
+    errors.PandasPendingDeprecationWarning : Class for deprecations that will raise a
+        PendingDeprecationWarning.
+    errors.PandasFutureWarning : Class for deprecations that will raise a FutureWarning.
+
+    Examples
+    --------
+    >>> pd.errors.PandasDeprecationWarning
+    <class 'pandas.errors.PandasDeprecationWarning'>
+    """
+
+
+class PandasFutureWarning(PandasChangeWarning, FutureWarning):
+    """
+    Warning raised for an upcoming change that is a FutureWarning.
+
+    See Also
+    --------
+    errors.PandasChangeWarning: Class for deprecations that will raise any warning.
+    errors.PandasPendingDeprecationWarning : Class for deprecations that will raise a
+        PendingDeprecationWarning.
+    errors.PandasDeprecationWarning : Class for deprecations that will raise a
+        DeprecationWarning.
+
+    Examples
+    --------
+    >>> pd.errors.PandasFutureWarning
+    <class 'pandas.errors.PandasFutureWarning'>
+    """
+
+
+class Pandas4Warning(PandasDeprecationWarning):
+    """
+    Warning raised for an upcoming change that will be enforced in pandas 4.0.
+
+    See Also
+    --------
+    errors.PandasChangeWarning: Class for deprecations that will raise any warning.
+    errors.PandasPendingDeprecationWarning : Class for deprecations that will raise a
+        PendingDeprecationWarning.
+    errors.PandasDeprecationWarning : Class for deprecations that will raise a
+        DeprecationWarning.
+    errors.PandasFutureWarning : Class for deprecations that will raise a FutureWarning.
+
+    Examples
+    --------
+    >>> pd.errors.Pandas4Warning
+    <class 'pandas.errors.Pandas4Warning'>
+    """
+
+    @classmethod
+    def version(cls) -> str:
+        """Version where change will be enforced."""
+        return "4.0"
+
+
+class Pandas5Warning(PandasPendingDeprecationWarning):
+    """
+    Warning raised for an upcoming change that will be enforced in pandas 5.0.
+
+    See Also
+    --------
+    errors.PandasChangeWarning: Class for deprecations that will raise any warning.
+    errors.PandasPendingDeprecationWarning : Class for deprecations that will raise a
+        PendingDeprecationWarning.
+    errors.PandasDeprecationWarning : Class for deprecations that will raise a
+        DeprecationWarning.
+    errors.PandasFutureWarning : Class for deprecations that will raise a FutureWarning.
+
+    Examples
+    --------
+    >>> pd.errors.Pandas5Warning
+    <class 'pandas.errors.Pandas5Warning'>
+    """
+
+    @classmethod
+    def version(cls) -> str:
+        """Version where change will be enforced."""
+        return "5.0"
+
+
+_CurrentDeprecationWarning = Pandas4Warning
 
 
 class UnsupportedFunctionCall(ValueError):
@@ -379,7 +513,7 @@ class AbstractMethodError(NotImplementedError):
         types = {"method", "classmethod", "staticmethod", "property"}
         if methodtype not in types:
             raise ValueError(
-                f"methodtype must be one of {methodtype}, got {types} instead."
+                f"methodtype must be one of {types}, got {methodtype} instead."
             )
         self.methodtype = methodtype
         self.class_instance = class_instance
@@ -587,6 +721,20 @@ class UndefinedVariableError(NameError):
     Exception raised by ``query`` or ``eval`` when using an undefined variable name.
 
     It will also specify whether the undefined variable is local or not.
+
+    Parameters
+    ----------
+    name : str
+        The name of the undefined variable.
+    is_local : bool or None, optional
+        Indicates whether the undefined variable is considered a local variable.
+        If ``True``, the error message specifies it as a local variable.
+        If ``False`` or ``None``, the variable is treated as a non-local name.
+
+    See Also
+    --------
+    DataFrame.query : Query the columns of a DataFrame with a boolean expression.
+    DataFrame.eval : Evaluate a string describing operations on DataFrame columns.
 
     Examples
     --------
@@ -806,6 +954,16 @@ class ValueLabelTypeMismatch(Warning):
     """
     Warning raised by to_stata on a category column that contains non-string values.
 
+    When exporting data to Stata format using the `to_stata` method, category columns
+    must have string values as labels. If a category column contains non-string values
+    (e.g., integers, floats, or other types), this warning is raised to indicate that
+    the Stata file may not correctly represent the data.
+
+    See Also
+    --------
+    DataFrame.to_stata : Export DataFrame object to Stata dta format.
+    Series.cat : Accessor for categorical properties of the Series values.
+
     Examples
     --------
     >>> df = pd.DataFrame({"categories": pd.Series(["a", 2], dtype="category")})
@@ -893,6 +1051,7 @@ __all__ = [
     "DuplicateLabelError",
     "EmptyDataError",
     "IncompatibilityWarning",
+    "IncompatibleFrequency",
     "IndexingError",
     "IntCastingNaNError",
     "InvalidColumnName",
@@ -908,6 +1067,12 @@ __all__ = [
     "OptionError",
     "OutOfBoundsDatetime",
     "OutOfBoundsTimedelta",
+    "Pandas4Warning",
+    "Pandas5Warning",
+    "PandasChangeWarning",
+    "PandasDeprecationWarning",
+    "PandasFutureWarning",
+    "PandasPendingDeprecationWarning",
     "ParserError",
     "ParserWarning",
     "PerformanceWarning",

@@ -1,6 +1,8 @@
 import numpy as np
 import pytest
 
+from pandas.errors import OutOfBoundsDatetime
+
 from pandas import (
     Categorical,
     DataFrame,
@@ -459,9 +461,47 @@ class TestFillNA:
         expected = df.fillna(df.max().to_dict())
         tm.assert_frame_equal(result, expected)
 
-        # disable this for now
-        with pytest.raises(NotImplementedError, match="column by column"):
-            df.fillna(df.max(axis=1), axis=1)
+    def test_fillna_dict_series_axis_1(self):
+        df = DataFrame(
+            {
+                "a": [np.nan, 1, 2, np.nan, np.nan],
+                "b": [1, 2, 3, np.nan, np.nan],
+                "c": [np.nan, 1, 2, 3, 4],
+            }
+        )
+        result = df.fillna(df.max(axis=1), axis=1)
+        df.fillna(df.max(axis=1), axis=1, inplace=True)
+        expected = DataFrame(
+            {
+                "a": [1.0, 1.0, 2.0, 3.0, 4.0],
+                "b": [1.0, 2.0, 3.0, 3.0, 4.0],
+                "c": [1.0, 1.0, 2.0, 3.0, 4.0],
+            }
+        )
+        tm.assert_frame_equal(result, expected)
+        tm.assert_frame_equal(df, expected)
+
+    def test_fillna_dict_series_axis_1_mismatch_cols(self):
+        df = DataFrame(
+            {
+                "a": ["abc", "def", np.nan, "ghi", "jkl"],
+                "b": [1, 2, 3, np.nan, np.nan],
+                "c": [np.nan, 1, 2, 3, 4],
+            }
+        )
+        with pytest.raises(ValueError, match="All columns must have the same dtype"):
+            df.fillna(Series({"a": "abc", "b": "def", "c": "hij"}), axis=1)
+
+    def test_fillna_dict_series_axis_1_value_mismatch_with_cols(self):
+        df = DataFrame(
+            {
+                "a": [np.nan, 1, 2, np.nan, np.nan],
+                "b": [1, 2, 3, np.nan, np.nan],
+                "c": [np.nan, 1, 2, 3, 4],
+            }
+        )
+        with pytest.raises(ValueError, match=".* not a suitable type to fill into .*"):
+            df.fillna(Series({"a": "abc", "b": "def", "c": "hij"}), axis=1)
 
     def test_fillna_dataframe(self):
         # GH#8377
@@ -781,3 +821,15 @@ def test_fillna_with_none_object(test_frame, dtype):
     if test_frame:
         expected = expected.to_frame()
     tm.assert_equal(result, expected)
+
+
+def test_fillna_out_of_bounds_datetime():
+    # GH#61208
+    df = DataFrame(
+        {"datetime": date_range("1/1/2011", periods=3, freq="h"), "value": [1, 2, 3]}
+    )
+    df.iloc[0, 0] = None
+
+    msg = "Cannot cast 0001-01-01 00:00:00 to unit='ns' without overflow"
+    with pytest.raises(OutOfBoundsDatetime, match=msg):
+        df.fillna(Timestamp("0001-01-01"))

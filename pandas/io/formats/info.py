@@ -226,12 +226,17 @@ series_see_also_sub = dedent(
     Series.describe: Generate descriptive statistics of Series.
     Series.memory_usage: Memory usage of Series."""
 )
+series_max_cols_sub = dedent(
+    """\
+    max_cols : int, optional
+        Unused, exists only for compatibility with DataFrame.info."""
+)
 
 
 series_sub_kwargs = {
     "klass": "Series",
     "type_sub": "",
-    "max_cols_sub": "",
+    "max_cols_sub": series_max_cols_sub,
     "show_counts_sub": show_counts_sub,
     "examples_sub": series_examples_sub,
     "see_also_sub": series_see_also_sub,
@@ -244,7 +249,7 @@ INFO_DOCSTRING = dedent(
     Print a concise summary of a {klass}.
 
     This method prints information about a {klass} including
-    the index dtype{type_sub}, non-null values and memory usage.
+    the index dtype{type_sub}, non-NA values and memory usage.
     {version_added_sub}\
 
     Parameters
@@ -863,12 +868,14 @@ class _TableBuilderVerboseMixin(_TableBuilderAbstract):
         body_column_widths = self._get_body_column_widths()
         return [
             max(*widths)
-            for widths in zip(self.header_column_widths, body_column_widths)
+            for widths in zip(
+                self.header_column_widths, body_column_widths, strict=False
+            )
         ]
 
     def _get_body_column_widths(self) -> Sequence[int]:
         """Get widths of table content columns."""
-        strcols: Sequence[Sequence[str]] = list(zip(*self.strrows))
+        strcols: Sequence[Sequence[str]] = list(zip(*self.strrows, strict=True))
         return [max(len(x) for x in col) for col in strcols]
 
     def _gen_rows(self) -> Iterator[Sequence[str]]:
@@ -894,7 +901,9 @@ class _TableBuilderVerboseMixin(_TableBuilderAbstract):
         header_line = self.SPACING.join(
             [
                 _put_str(header, col_width)
-                for header, col_width in zip(self.headers, self.gross_column_widths)
+                for header, col_width in zip(
+                    self.headers, self.gross_column_widths, strict=True
+                )
             ]
         )
         self._lines.append(header_line)
@@ -904,7 +913,7 @@ class _TableBuilderVerboseMixin(_TableBuilderAbstract):
             [
                 _put_str("-" * header_colwidth, gross_colwidth)
                 for header_colwidth, gross_colwidth in zip(
-                    self.header_column_widths, self.gross_column_widths
+                    self.header_column_widths, self.gross_column_widths, strict=True
                 )
             ]
         )
@@ -915,7 +924,9 @@ class _TableBuilderVerboseMixin(_TableBuilderAbstract):
             body_line = self.SPACING.join(
                 [
                     _put_str(col, gross_colwidth)
-                    for col, gross_colwidth in zip(row, self.gross_column_widths)
+                    for col, gross_colwidth in zip(
+                        row, self.gross_column_widths, strict=True
+                    )
                 ]
             )
             self._lines.append(body_line)
@@ -975,6 +986,7 @@ class _DataFrameTableBuilderVerbose(_DataFrameTableBuilder, _TableBuilderVerbose
             self._gen_line_numbers(),
             self._gen_columns(),
             self._gen_dtypes(),
+            strict=True,
         )
 
     def _gen_rows_with_counts(self) -> Iterator[Sequence[str]]:
@@ -984,6 +996,7 @@ class _DataFrameTableBuilderVerbose(_DataFrameTableBuilder, _TableBuilderVerbose
             self._gen_columns(),
             self._gen_non_null_counts(),
             self._gen_dtypes(),
+            strict=True,
         )
 
     def _gen_line_numbers(self) -> Iterator[str]:
@@ -1083,14 +1096,11 @@ class _SeriesTableBuilderVerbose(_SeriesTableBuilder, _TableBuilderVerboseMixin)
 
     def _gen_rows_without_counts(self) -> Iterator[Sequence[str]]:
         """Iterator with string representation of body data without counts."""
-        yield from self._gen_dtypes()
+        yield from ([dtype] for dtype in self._gen_dtypes())
 
     def _gen_rows_with_counts(self) -> Iterator[Sequence[str]]:
         """Iterator with string representation of body data with counts."""
-        yield from zip(
-            self._gen_non_null_counts(),
-            self._gen_dtypes(),
-        )
+        yield from zip(self._gen_non_null_counts(), self._gen_dtypes(), strict=True)
 
 
 def _get_dataframe_dtype_counts(df: DataFrame) -> Mapping[str, int]:

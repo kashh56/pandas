@@ -17,8 +17,8 @@ from typing import (
     Any,
     Literal,
     NamedTuple,
+    TypeAlias,
     TypeVar,
-    Union,
     cast,
 )
 import warnings
@@ -27,7 +27,10 @@ import numpy as np
 
 from pandas._libs import Interval
 from pandas._libs.hashtable import duplicated
-from pandas.errors import SpecificationError
+from pandas.errors import (
+    Pandas4Warning,
+    SpecificationError,
+)
 from pandas.util._decorators import (
     Appender,
     Substitution,
@@ -102,7 +105,7 @@ if TYPE_CHECKING:
     from pandas.core.generic import NDFrame
 
 # TODO(typing) the return value on this callable should be any *scalar*.
-AggScalar = Union[str, Callable[..., Any]]
+AggScalar: TypeAlias = str | Callable[..., Any]
 # TODO: validate types on ScalarResult and move to _typing
 # Blocked from using by https://github.com/python/mypy/issues/1484
 # See note at _mangle_lambda_list
@@ -504,11 +507,13 @@ class SeriesGroupBy(GroupBy[Series]):
                 #  inference. We default to using the existing dtype.
                 #  xref GH#51445
                 obj = self._obj_with_exclusions
-                return self.obj._constructor(
-                    [],
-                    name=self.obj.name,
-                    index=self._grouper.result_index,
-                    dtype=obj.dtype,
+                return self._wrap_aggregated_output(
+                    self.obj._constructor(
+                        [],
+                        name=self.obj.name,
+                        index=self._grouper.result_index,
+                        dtype=obj.dtype,
+                    )
                 )
             return self._python_agg_general(func, *args, **kwargs)
 
@@ -531,7 +536,7 @@ class SeriesGroupBy(GroupBy[Series]):
         else:
             # list of functions / function names
             columns = (com.get_callable_name(f) or f for f in arg)
-            arg = zip(columns, arg)
+            arg = zip(columns, arg, strict=True)
 
         results: dict[base.OutputKey, DataFrame | Series] = {}
         with com.temp_setattr(self, "as_index", True):
@@ -616,7 +621,7 @@ class SeriesGroupBy(GroupBy[Series]):
             if not self.as_index and not_indexed_same:
                 result = self._insert_inaxis_grouper(result)
                 result.index = default_index(len(result))
-            return result
+            return result.__finalize__(self.obj, method="groupby")
         else:
             # GH #6265 #24880
             result = self.obj._constructor(
@@ -625,7 +630,7 @@ class SeriesGroupBy(GroupBy[Series]):
             if not self.as_index:
                 result = self._insert_inaxis_grouper(result)
                 result.index = default_index(len(result))
-            return result
+            return result.__finalize__(self.obj, method="groupby")
 
     __examples_series_doc = dedent(
         """
@@ -1272,13 +1277,86 @@ class SeriesGroupBy(GroupBy[Series]):
         Name: Max Speed, dtype: float64
         """
 
+        return self._cython_agg_general(
+            "skew", alt=None, skipna=skipna, numeric_only=numeric_only, **kwargs
+        )
+
+    def kurt(
+        self,
+        skipna: bool = True,
+        numeric_only: bool = False,
+        **kwargs,
+    ) -> Series:
+        """
+        Return unbiased kurtosis within groups.
+
+        Parameters
+        ----------
+        skipna : bool, default True
+            Exclude NA/null values when computing the result.
+
+        numeric_only : bool, default False
+            Include only float, int, boolean columns. Not implemented for Series.
+
+        **kwargs
+            Additional keyword arguments to be passed to the function.
+
+        Returns
+        -------
+        Series
+            Unbiased kurtosis within groups.
+
+        See Also
+        --------
+        Series.kurt : Return unbiased kurtosis over requested axis.
+
+        Examples
+        --------
+        >>> ser = pd.Series(
+        ...     [390.0, 350.0, 357.0, 333.0, np.nan, 22.0, 20.0, 30.0, 40.0, 41.0],
+        ...     index=[
+        ...         "Falcon",
+        ...         "Falcon",
+        ...         "Falcon",
+        ...         "Falcon",
+        ...         "Falcon",
+        ...         "Parrot",
+        ...         "Parrot",
+        ...         "Parrot",
+        ...         "Parrot",
+        ...         "Parrot",
+        ...     ],
+        ...     name="Max Speed",
+        ... )
+        >>> ser
+        Falcon    390.0
+        Falcon    350.0
+        Falcon    357.0
+        Falcon    333.0
+        Falcon      NaN
+        Parrot     22.0
+        Parrot     20.0
+        Parrot     30.0
+        Parrot     40.0
+        Parrot     41.0
+        Name: Max Speed, dtype: float64
+        >>> ser.groupby(level=0).kurt()
+        Falcon    1.622109
+        Parrot   -2.878714
+        Name: Max Speed, dtype: float64
+        >>> ser.groupby(level=0).kurt(skipna=False)
+        Falcon         NaN
+        Parrot   -2.878714
+        Name: Max Speed, dtype: float64
+        """
+
         def alt(obj):
             # This should not be reached since the cython path should raise
             #  TypeError and not NotImplementedError.
-            raise TypeError(f"'skew' is not supported for dtype={obj.dtype}")
+            raise TypeError(f"'kurt' is not supported for dtype={obj.dtype}")
 
         return self._cython_agg_general(
-            "skew", alt=alt, skipna=skipna, numeric_only=numeric_only, **kwargs
+            "kurt", alt=alt, skipna=skipna, numeric_only=numeric_only, **kwargs
         )
 
     @property
@@ -1329,7 +1407,15 @@ class SeriesGroupBy(GroupBy[Series]):
         Raises
         ------
         ValueError
-            If the Series is empty or skipna=False and any value is NA.
+            When there are no valid values for a group. Then can happen if:
+
+                * There is an unobserved group and ``observed=False``.
+                * All values for a group are NA.
+                * Some values for a group are NA and ``skipna=False``.
+
+        .. versionchanged:: 3.0.0
+            Previously if all values for a group are NA or some values for a group are
+            NA and ``skipna=False``, this method would return NA. Now it raises instead.
 
         See Also
         --------
@@ -1382,7 +1468,15 @@ class SeriesGroupBy(GroupBy[Series]):
         Raises
         ------
         ValueError
-            If the Series is empty or skipna=False and any value is NA.
+            When there are no valid values for a group. Then can happen if:
+
+                * There is an unobserved group and ``observed=False``.
+                * All values for a group are NA.
+                * Some values for a group are NA and ``skipna=False``.
+
+        .. versionchanged:: 3.0.0
+            Previously if all values for a group are NA or some values for a group are
+            NA and ``skipna=False``, this method would return NA. Now it raises instead.
 
         See Also
         --------
@@ -2075,7 +2169,7 @@ class DataFrameGroupBy(GroupBy[DataFrame]):
         if not self.as_index:
             result = self._insert_inaxis_grouper(result)
 
-        return result
+        return result.__finalize__(self.obj, method="groupby")
 
     def _cython_transform(
         self,
@@ -2432,7 +2526,7 @@ class DataFrameGroupBy(GroupBy[DataFrame]):
         )
         results = [func(sgb) for sgb in sgbs]
 
-        if not len(results):
+        if not results:
             # concat would raise
             res_df = DataFrame([], columns=columns, index=self._grouper.result_index)
         else:
@@ -2522,7 +2616,15 @@ class DataFrameGroupBy(GroupBy[DataFrame]):
         Raises
         ------
         ValueError
-            * If a column is empty or skipna=False and any value is NA.
+            When there are no valid values for a group. Then can happen if:
+
+                * There is an unobserved group and ``observed=False``.
+                * All values for a group are NA.
+                * Some values for a group are NA and ``skipna=False``.
+
+        .. versionchanged:: 3.0.0
+            Previously if all values for a group are NA or some values for a group are
+            NA and ``skipna=False``, this method would return NA. Now it raises instead.
 
         See Also
         --------
@@ -2588,7 +2690,15 @@ class DataFrameGroupBy(GroupBy[DataFrame]):
         Raises
         ------
         ValueError
-            * If a column is empty or skipna=False and any value is NA.
+            When there are no valid values for a group. Then can happen if:
+
+                * There is an unobserved group and ``observed=False``.
+                * All values for a group are NA.
+                * Some values for a group are NA and ``skipna=False``.
+
+        .. versionchanged:: 3.0.0
+            Previously if all values for a group are NA or some values for a group are
+            NA and ``skipna=False``, this method would return NA. Now it raises instead.
 
         See Also
         --------
@@ -2921,6 +3031,111 @@ class DataFrameGroupBy(GroupBy[DataFrame]):
             "skew", alt=alt, skipna=skipna, numeric_only=numeric_only, **kwargs
         )
 
+    def kurt(
+        self,
+        skipna: bool = True,
+        numeric_only: bool = False,
+        **kwargs,
+    ) -> DataFrame:
+        """
+        Return unbiased kurtosis within groups.
+
+        Parameters
+        ----------
+        skipna : bool, default True
+            Exclude NA/null values when computing the result.
+
+        numeric_only : bool, default False
+            Include only float, int, boolean columns.
+
+        **kwargs
+            Additional keyword arguments to be passed to the function.
+
+        Returns
+        -------
+        DataFrame
+            Unbiased kurtosis within groups.
+
+        See Also
+        --------
+        DataFrame.kurt : Return unbiased kurtosis over requested axis.
+
+        Examples
+        --------
+        >>> arrays = [
+        ...     [
+        ...         "falcon",
+        ...         "parrot",
+        ...         "cockatoo",
+        ...         "kiwi",
+        ...         "eagle",
+        ...         "lion",
+        ...         "monkey",
+        ...         "rabbit",
+        ...         "dog",
+        ...         "wolf",
+        ...     ],
+        ...     [
+        ...         "bird",
+        ...         "bird",
+        ...         "bird",
+        ...         "bird",
+        ...         "bird",
+        ...         "mammal",
+        ...         "mammal",
+        ...         "mammal",
+        ...         "mammal",
+        ...         "mammal",
+        ...     ],
+        ... ]
+        >>> index = pd.MultiIndex.from_arrays(arrays, names=("name", "class"))
+        >>> df = pd.DataFrame(
+        ...     {
+        ...         "max_speed": [
+        ...             389.0,
+        ...             24.0,
+        ...             70.0,
+        ...             np.nan,
+        ...             350.0,
+        ...             80.5,
+        ...             21.5,
+        ...             15.0,
+        ...             40.0,
+        ...             50.0,
+        ...         ]
+        ...     },
+        ...     index=index,
+        ... )
+        >>> df
+                         max_speed
+        name     class
+        falcon   bird        389.0
+        parrot   bird         24.0
+        cockatoo bird         70.0
+        kiwi     bird          NaN
+        eagle    bird        350.0
+        lion     mammal       80.5
+        monkey   mammal       21.5
+        rabbit   mammal       15.0
+        dog      mammal       40.0
+        wolf     mammal       50.0
+        >>> gb = df.groupby(["class"])
+        >>> gb.kurt()
+                max_speed
+        class
+        bird    -5.493277
+        mammal   0.204125
+        >>> gb.kurt(skipna=False)
+                max_speed
+        class
+        bird          NaN
+        mammal   0.204125
+        """
+
+        return self._cython_agg_general(
+            "kurt", alt=None, skipna=skipna, numeric_only=numeric_only, **kwargs
+        )
+
     @property
     @doc(DataFrame.plot.__doc__)
     def plot(self) -> GroupByPlot:
@@ -3152,7 +3367,7 @@ class DataFrameGroupBy(GroupBy[DataFrame]):
         """
         warnings.warn(
             "DataFrameGroupBy.corrwith is deprecated",
-            FutureWarning,
+            Pandas4Warning,
             stacklevel=find_stack_level(),
         )
         result = self._op_via_apply(

@@ -1,4 +1,4 @@
-"""Common IO api utilities"""
+"""Common I/O API utilities"""
 
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ from pandas.core.shared_docs import _shared_docs
 
 _VALID_URLS = set(uses_relative + uses_netloc + uses_params)
 _VALID_URLS.discard("")
-_RFC_3986_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+\-+.]*://")
+_FSSPEC_URL_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+\-+.]*(::[A-Za-z0-9+\-+.]+)*://")
 
 BaseBufferT = TypeVar("BaseBufferT", bound=BaseBuffer)
 
@@ -291,7 +291,7 @@ def is_fsspec_url(url: FilePath | BaseBuffer) -> bool:
     """
     return (
         isinstance(url, str)
-        and bool(_RFC_3986_PATTERN.match(url))
+        and bool(_FSSPEC_URL_PATTERN.match(url))
         and not url.startswith(("http://", "https://"))
     )
 
@@ -951,9 +951,7 @@ def get_handle(
     )
 
 
-# error: Definition of "__enter__" in base class "IOBase" is incompatible
-# with definition in base class "BinaryIO"
-class _BufferedWriter(BytesIO, ABC):  # type: ignore[misc]
+class _BufferedWriter(BytesIO, ABC):
     """
     Some objects do not support multiple .write() calls (TarFile and ZipFile).
     This wrapper writes to the underlying buffer on close.
@@ -990,9 +988,12 @@ class _BytesTarFile(_BufferedWriter):
         super().__init__()
         self.archive_name = archive_name
         self.name = name
+        #  error: No overload variant of "open" of "TarFile" matches argument
+        # types "str | None", "str", "ReadBuffer[bytes] | WriteBuffer[bytes] | None",
+        # "dict[str, Any]"
         # error: Incompatible types in assignment (expression has type "TarFile",
-        # base class "_BufferedWriter" defined the type as "BytesIO")
-        self.buffer: tarfile.TarFile = tarfile.TarFile.open(  # type: ignore[assignment]
+        #  base class "_BufferedWriter" defined the type as "BytesIO")
+        self.buffer: tarfile.TarFile = tarfile.TarFile.open(  # type: ignore[call-overload, assignment]
             name=name,
             mode=self.extend_mode(mode),
             fileobj=fileobj,
@@ -1045,9 +1046,12 @@ class _BytesZipFile(_BufferedWriter):
         self.archive_name = archive_name
 
         kwargs.setdefault("compression", zipfile.ZIP_DEFLATED)
+        # error: No overload variant of "ZipFile" matches argument types
+        # "str | PathLike[str] | ReadBuffer[bytes] | WriteBuffer[bytes]",
+        # "str", "dict[str, Any]"
         # error: Incompatible types in assignment (expression has type "ZipFile",
         # base class "_BufferedWriter" defined the type as "BytesIO")
-        self.buffer: zipfile.ZipFile = zipfile.ZipFile(  # type: ignore[assignment]
+        self.buffer: zipfile.ZipFile = zipfile.ZipFile(  # type: ignore[call-overload, assignment]
             file, mode, **kwargs
         )
 

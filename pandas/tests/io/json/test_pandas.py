@@ -1,11 +1,13 @@
 import datetime
 from datetime import timedelta
-from decimal import Decimal
-from io import StringIO
+from io import (
+    BytesIO,
+    StringIO,
+)
 import json
 import os
 import sys
-import time
+import uuid
 
 import numpy as np
 import pytest
@@ -13,6 +15,7 @@ import pytest
 from pandas._config import using_string_dtype
 
 from pandas.compat import IS64
+from pandas.errors import Pandas4Warning
 import pandas.util._test_decorators as td
 
 import pandas as pd
@@ -143,7 +146,7 @@ class TestPandasContainer:
             "in a future version, please use 'iso' date format instead."
         )
         if df.iloc[:, 0].dtype == "datetime64[s]":
-            expected_warning = FutureWarning
+            expected_warning = Pandas4Warning
 
         with tm.assert_produces_warning(expected_warning, match=msg):
             result = read_json(
@@ -778,7 +781,7 @@ class TestPandasContainer:
             "The default 'epoch' date format is deprecated and will be removed "
             "in a future version, please use 'iso' date format instead."
         )
-        with tm.assert_produces_warning(FutureWarning, match=msg):
+        with tm.assert_produces_warning(Pandas4Warning, match=msg):
             data = StringIO(s.to_json())
         result = read_json(data, typ="series", dtype=dtype)
         tm.assert_series_equal(result, expected)
@@ -802,11 +805,10 @@ class TestPandasContainer:
         result = read_json(StringIO(df.to_json()))
         tm.assert_frame_equal(result, df)
 
-    def test_path(self, float_frame, int_frame, datetime_frame):
-        with tm.ensure_clean("test.json") as path:
-            for df in [float_frame, int_frame, datetime_frame]:
-                df.to_json(path)
-                read_json(path)
+    def test_path(self, float_frame, int_frame, datetime_frame, temp_file):
+        for df in [float_frame, int_frame, datetime_frame]:
+            df.to_json(temp_file)
+            read_json(temp_file)
 
     def test_axis_dates(self, datetime_series, datetime_frame):
         # frame
@@ -829,13 +831,13 @@ class TestPandasContainer:
             "The default 'epoch' date format is deprecated and will be removed "
             "in a future version, please use 'iso' date format instead."
         )
-        with tm.assert_produces_warning(FutureWarning, match=msg):
+        with tm.assert_produces_warning(Pandas4Warning, match=msg):
             json = StringIO(df.to_json())
         result = read_json(json)
         tm.assert_frame_equal(result, df)
 
         df["foo"] = 1.0
-        with tm.assert_produces_warning(FutureWarning, match=msg):
+        with tm.assert_produces_warning(Pandas4Warning, match=msg):
             json = StringIO(df.to_json(date_unit="ns"))
 
         result = read_json(json, convert_dates=False)
@@ -846,7 +848,7 @@ class TestPandasContainer:
 
         # series
         ts = Series(Timestamp("20130101").as_unit("ns"), index=datetime_series.index)
-        with tm.assert_produces_warning(FutureWarning, match=msg):
+        with tm.assert_produces_warning(Pandas4Warning, match=msg):
             json = StringIO(ts.to_json())
         result = read_json(json, typ="series")
         tm.assert_series_equal(result, ts)
@@ -868,7 +870,7 @@ class TestPandasContainer:
         expected_warning = None
         if date_format == "epoch":
             expected = '{"1577836800000":1577836800000,"null":null}'
-            expected_warning = FutureWarning
+            expected_warning = Pandas4Warning
         else:
             expected = (
                 '{"2020-01-01T00:00:00.000":"2020-01-01T00:00:00.000","null":null}'
@@ -982,7 +984,7 @@ class TestPandasContainer:
             "'epoch' date format is deprecated and will be removed in a future "
             "version, please use 'iso' date format instead."
         )
-        with tm.assert_produces_warning(FutureWarning, match=msg):
+        with tm.assert_produces_warning(Pandas4Warning, match=msg):
             json = df.to_json(date_format="epoch", date_unit=unit)
 
         # force date unit
@@ -1002,13 +1004,13 @@ class TestPandasContainer:
                 DataFrame(
                     {"A": ["a", "b", "c"], "B": pd.to_timedelta(np.arange(3), unit="D")}
                 ),
-                FutureWarning,
+                Pandas4Warning,
             ),
             (
                 DataFrame(
                     {"A": pd.to_datetime(["2020-01-01", "2020-02-01", "2020-03-01"])}
                 ),
-                FutureWarning,
+                Pandas4Warning,
             ),
         ],
     )
@@ -1094,7 +1096,7 @@ class TestPandasContainer:
             "The default 'epoch' date format is deprecated and will be removed "
             "in a future version, please use 'iso' date format instead."
         )
-        with tm.assert_produces_warning(FutureWarning, match=msg):
+        with tm.assert_produces_warning(Pandas4Warning, match=msg):
             json = StringIO(dfj2.to_json())
         result = read_json(json, dtype={"ints": np.int64, "bools": np.bool_})
         tm.assert_frame_equal(result, result)
@@ -1136,20 +1138,20 @@ class TestPandasContainer:
             "The default 'epoch' date format is deprecated and will be removed "
             "in a future version, please use 'iso' date format instead."
         )
-        with tm.assert_produces_warning(FutureWarning, match=msg):
+        with tm.assert_produces_warning(Pandas4Warning, match=msg):
             result = read_json(StringIO(ser.to_json()), typ="series").apply(converter)
         tm.assert_series_equal(result, ser)
 
         ser = Series([timedelta(23), timedelta(seconds=5)], index=Index([0, 1]))
         assert ser.dtype == "timedelta64[ns]"
-        with tm.assert_produces_warning(FutureWarning, match=msg):
+        with tm.assert_produces_warning(Pandas4Warning, match=msg):
             result = read_json(StringIO(ser.to_json()), typ="series").apply(converter)
         tm.assert_series_equal(result, ser)
 
         frame = DataFrame([timedelta(23), timedelta(seconds=5)])
         assert frame[0].dtype == "timedelta64[ns]"
 
-        with tm.assert_produces_warning(FutureWarning, match=msg):
+        with tm.assert_produces_warning(Pandas4Warning, match=msg):
             json = frame.to_json()
         tm.assert_frame_equal(frame, read_json(StringIO(json)).apply(converter))
 
@@ -1165,7 +1167,7 @@ class TestPandasContainer:
             "The default 'epoch' date format is deprecated and will be removed "
             "in a future version, please use 'iso' date format instead."
         )
-        with tm.assert_produces_warning(FutureWarning, match=msg):
+        with tm.assert_produces_warning(Pandas4Warning, match=msg):
             data = StringIO(frame.to_json(date_unit="ns"))
         result = read_json(data)
         result["a"] = pd.to_timedelta(result.a, unit="ns")
@@ -1200,7 +1202,7 @@ class TestPandasContainer:
                 '{"P1DT0H0M0S":"P1DT0H0M0S","P2DT0H0M0S":"P2DT0H0M0S","null":null}'
             )
         else:
-            expected_warning = FutureWarning
+            expected_warning = Pandas4Warning
             expected = '{"86400000":86400000,"172800000":172800000,"null":null}'
 
         if as_object:
@@ -1219,7 +1221,7 @@ class TestPandasContainer:
     def test_timedelta_to_json_fractional_precision(self, as_object, timedelta_typ):
         data = [timedelta_typ(milliseconds=42)]
         ser = Series(data, index=data)
-        warn = FutureWarning
+        warn = Pandas4Warning
         if as_object:
             ser = ser.astype(object)
             warn = None
@@ -1268,9 +1270,7 @@ class TestPandasContainer:
             columns=["a", "b"],
         )
         expected = (
-            '[["(1+0j)","(nan+0j)"],'
-            '["(2.3+0j)","(nan+0j)"],'
-            '["(4-5j)","(1.2+0j)"]]'
+            '[["(1+0j)","(nan+0j)"],["(2.3+0j)","(nan+0j)"],["(4-5j)","(1.2+0j)"]]'
         )
         assert df.to_json(default_handler=str, orient="values") == expected
 
@@ -1315,13 +1315,13 @@ class TestPandasContainer:
             "The default 'epoch' date format is deprecated and will be removed "
             "in a future version, please use 'iso' date format instead."
         )
-        with tm.assert_produces_warning(FutureWarning, match=msg):
+        with tm.assert_produces_warning(Pandas4Warning, match=msg):
             expected = df_naive.to_json()
             assert expected == df.to_json()
 
         stz = Series(tz_range)
         s_naive = Series(tz_naive)
-        with tm.assert_produces_warning(FutureWarning, match=msg):
+        with tm.assert_produces_warning(Pandas4Warning, match=msg):
             assert stz.to_json() == s_naive.to_json()
 
     def test_sparse(self):
@@ -1373,11 +1373,7 @@ class TestPandasContainer:
     )
     def test_tz_range_is_utc(self, tz_range):
         exp = '["2013-01-01T05:00:00.000Z","2013-01-02T05:00:00.000Z"]'
-        dfexp = (
-            '{"DT":{'
-            '"0":"2013-01-01T05:00:00.000Z",'
-            '"1":"2013-01-02T05:00:00.000Z"}}'
-        )
+        dfexp = '{"DT":{"0":"2013-01-01T05:00:00.000Z","1":"2013-01-02T05:00:00.000Z"}}'
 
         assert ujson_dumps(tz_range, iso_dates=True) == exp
         dti = DatetimeIndex(tz_range)
@@ -1413,26 +1409,25 @@ class TestPandasContainer:
         tm.assert_frame_equal(result, expected)
 
     @pytest.mark.single_cpu
+    @pytest.mark.network
     @td.skip_if_not_us_locale
-    def test_read_s3_jsonl(self, s3_public_bucket_with_data, s3so):
+    def test_read_s3_jsonl(self, s3_bucket_public_with_data, s3so):
         # GH17200
-
         result = read_json(
-            f"s3n://{s3_public_bucket_with_data.name}/items.jsonl",
+            f"s3n://{s3_bucket_public_with_data.name}/items.jsonl",
             lines=True,
             storage_options=s3so,
         )
         expected = DataFrame([[1, 2], [1, 2]], columns=["a", "b"])
         tm.assert_frame_equal(result, expected)
 
-    def test_read_local_jsonl(self):
+    def test_read_local_jsonl(self, temp_file):
         # GH17200
-        with tm.ensure_clean("tmp_items.json") as path:
-            with open(path, "w", encoding="utf-8") as infile:
-                infile.write('{"a": 1, "b": 2}\n{"b":2, "a" :1}\n')
-            result = read_json(path, lines=True)
-            expected = DataFrame([[1, 2], [1, 2]], columns=["a", "b"])
-            tm.assert_frame_equal(result, expected)
+        with open(temp_file, "w", encoding="utf-8") as infile:
+            infile.write('{"a": 1, "b": 2}\n{"b":2, "a" :1}\n')
+        result = read_json(temp_file, lines=True)
+        expected = DataFrame([[1, 2], [1, 2]], columns=["a", "b"])
+        tm.assert_frame_equal(result, expected)
 
     def test_read_jsonl_unicode_chars(self):
         # GH15132: non-ascii unicode characters
@@ -1528,17 +1523,16 @@ class TestPandasContainer:
         ],
     )
     @pytest.mark.parametrize("dtype", ["category", object])
-    def test_latin_encoding(self, dtype, val):
+    def test_latin_encoding(self, dtype, val, temp_file):
         # GH 13774
         ser = Series(
             [x.decode("latin-1") if isinstance(x, bytes) else x for x in val],
             dtype=dtype,
         )
         encoding = "latin-1"
-        with tm.ensure_clean("test.json") as path:
-            ser.to_json(path, encoding=encoding)
-            retr = read_json(StringIO(path), encoding=encoding)
-            tm.assert_series_equal(ser, retr, check_categorical=False)
+        ser.to_json(temp_file, encoding=encoding)
+        retr = read_json(StringIO(temp_file), encoding=encoding)
+        tm.assert_series_equal(ser, retr, check_categorical=False)
 
     def test_data_frame_size_after_to_json(self):
         # GH15344
@@ -1569,11 +1563,8 @@ class TestPandasContainer:
         result = read_json(StringIO(dfjson), orient="table")
         tm.assert_frame_equal(result, expected)
 
-    # TODO: We are casting to string which coerces None to NaN before casting back
-    # to object, ending up with incorrect na values
-    @pytest.mark.xfail(using_string_dtype(), reason="incorrect na conversion")
     @pytest.mark.parametrize("orient", ["split", "records", "index", "columns"])
-    def test_to_json_from_json_columns_dtypes(self, orient):
+    def test_to_json_from_json_columns_dtypes(self, orient, using_infer_string):
         # GH21892 GH33205
         expected = DataFrame.from_dict(
             {
@@ -1591,8 +1582,13 @@ class TestPandasContainer:
             "The default 'epoch' date format is deprecated and will be removed "
             "in a future version, please use 'iso' date format instead."
         )
-        with tm.assert_produces_warning(FutureWarning, match=msg):
+        with tm.assert_produces_warning(Pandas4Warning, match=msg):
             dfjson = expected.to_json(orient=orient)
+
+        if using_infer_string:
+            # When this is read back in it is inferred to "str" dtype which
+            #  uses NaN instead of None.
+            expected.loc[0, "Object"] = np.nan
 
         result = read_json(
             StringIO(dfjson),
@@ -1759,6 +1755,7 @@ class TestPandasContainer:
         [
             "s3://example-fsspec/",
             "gcs://another-fsspec/file.json",
+            "filecache::s3://yet-another-fsspec/file.json",
             "https://example-site.com/data",
             "some-protocol://data.txt",
         ],
@@ -1775,7 +1772,7 @@ class TestPandasContainer:
     )
     def test_read_json_with_very_long_file_path(self, compression):
         # GH 46718
-        long_json_path = f'{"a" * 1000}.json{compression}'
+        long_json_path = f"{'a' * 1000}.json{compression}"
         with pytest.raises(
             FileNotFoundError, match=f"File {long_json_path} does not exist"
         ):
@@ -1792,7 +1789,7 @@ class TestPandasContainer:
 
         expected_warning = None
         if date_format == "epoch":
-            expected_warning = FutureWarning
+            expected_warning = Pandas4Warning
 
         msg = (
             "'epoch' date format is deprecated and will be removed in a future "
@@ -2012,32 +2009,26 @@ class TestPandasContainer:
         assert result == expected
 
     @pytest.mark.single_cpu
-    def test_to_s3(self, s3_public_bucket, s3so):
+    @pytest.mark.network
+    def test_to_s3(self, s3_bucket_public, s3so):
         # GH 28375
-        mock_bucket_name, target_file = s3_public_bucket.name, "test.json"
+        mock_bucket_name = s3_bucket_public.name
+        target_file = f"{uuid.uuid4()}.json"
         df = DataFrame({"x": [1, 2, 3], "y": [2, 4, 6]})
-        df.to_json(f"s3://{mock_bucket_name}/{target_file}", storage_options=s3so)
-        timeout = 5
-        while True:
-            if target_file in (obj.key for obj in s3_public_bucket.objects.all()):
-                break
-            time.sleep(0.1)
-            timeout -= 0.1
-            assert timeout > 0, "Timed out waiting for file to appear on moto"
+        uri = f"s3://{mock_bucket_name}/{target_file}"
+        df.to_json(uri, storage_options=s3so)
+        result = read_json(uri, storage_options=s3so)
+        tm.assert_frame_equal(result, df)
 
-    def test_json_pandas_nulls(self, nulls_fixture, request):
+    def test_json_pandas_nulls(self, nulls_fixture):
         # GH 31615
-        if isinstance(nulls_fixture, Decimal):
-            mark = pytest.mark.xfail(reason="not implemented")
-            request.applymarker(mark)
-
         expected_warning = None
         msg = (
             "The default 'epoch' date format is deprecated and will be removed "
             "in a future version, please use 'iso' date format instead."
         )
         if nulls_fixture is pd.NaT:
-            expected_warning = FutureWarning
+            expected_warning = Pandas4Warning
 
         with tm.assert_produces_warning(expected_warning, match=msg):
             result = DataFrame([[nulls_fixture]]).to_json()
@@ -2138,9 +2129,9 @@ class TestPandasContainer:
         # GH#50750
         df = DataFrame(
             {
-                "a": Series([1, np.nan, 3], dtype="Int64"),
+                "a": Series([1, NA, 3], dtype="Int64"),
                 "b": Series([1, 2, 3], dtype="Int64"),
-                "c": Series([1.5, np.nan, 2.5], dtype="Float64"),
+                "c": Series([1.5, NA, 2.5], dtype="Float64"),
                 "d": Series([1.5, 2.0, 2.5], dtype="Float64"),
                 "e": [True, False, None],
                 "f": [True, False, True],
@@ -2163,9 +2154,9 @@ class TestPandasContainer:
 
         expected = DataFrame(
             {
-                "a": Series([1, np.nan, 3], dtype="Int64"),
+                "a": Series([1, NA, 3], dtype="Int64"),
                 "b": Series([1, 2, 3], dtype="Int64"),
-                "c": Series([1.5, np.nan, 2.5], dtype="Float64"),
+                "c": Series([1.5, NA, 2.5], dtype="Float64"),
                 "d": Series([1.5, 2.0, 2.5], dtype="Float64"),
                 "e": Series([True, False, NA], dtype="boolean"),
                 "f": Series([True, False, True], dtype="boolean"),
@@ -2192,11 +2183,35 @@ class TestPandasContainer:
         # string_storage setting -> ignore that for checking the result
         tm.assert_frame_equal(result, expected, check_column_type=False)
 
+    @td.skip_if_no("pyarrow")
+    @pytest.mark.filterwarnings("ignore:Passing a BlockManager:DeprecationWarning")
+    def test_read_json_pyarrow_with_dtype(self):
+        dtype = {"a": "int32[pyarrow]", "b": "int64[pyarrow]"}
+        json = b'{"a": 1, "b": 2}\n'
+
+        df = read_json(
+            BytesIO(json),
+            dtype=dtype,
+            lines=True,
+            engine="pyarrow",
+            dtype_backend="pyarrow",
+        )
+
+        result = df.dtypes
+        expected = Series(
+            data=[
+                pd.ArrowDtype.construct_from_string("int32[pyarrow]"),
+                pd.ArrowDtype.construct_from_string("int64[pyarrow]"),
+            ],
+            index=["a", "b"],
+        )
+        tm.assert_series_equal(result, expected)
+
     @pytest.mark.parametrize("orient", ["split", "records", "index"])
     def test_read_json_nullable_series(self, string_storage, dtype_backend, orient):
         # GH#50750
         pa = pytest.importorskip("pyarrow")
-        ser = Series([1, np.nan, 3], dtype="Int64")
+        ser = Series([1, NA, 3], dtype="Int64")
 
         out = ser.to_json(orient=orient)
         with pd.option_context("mode.string_storage", string_storage):
@@ -2204,7 +2219,7 @@ class TestPandasContainer:
                 StringIO(out), dtype_backend=dtype_backend, orient=orient, typ="series"
             )
 
-        expected = Series([1, np.nan, 3], dtype="Int64")
+        expected = Series([1, NA, 3], dtype="Int64")
 
         if dtype_backend == "pyarrow":
             from pandas.arrays import ArrowExtensionArray

@@ -6,6 +6,8 @@ import re
 import numpy as np
 import pytest
 
+import pandas.util._test_decorators as td
+
 import pandas as pd
 from pandas import (
     DataFrame,
@@ -334,7 +336,6 @@ class TestDataFrameReplace:
         return_value = res3.replace(regex=r"\s*\.\s*", value=0, inplace=True)
         assert return_value is None
         expec = DataFrame({"a": mix_abc["a"], "b": ["a", "b", 0, 0], "c": mix_abc["c"]})
-        # TODO(infer_string)
         expec["c"] = expec["c"].astype(object)
         tm.assert_frame_equal(res, expec)
         tm.assert_frame_equal(res2, expec)
@@ -644,7 +645,7 @@ class TestDataFrameReplace:
 
     def test_replace_nullable_int_with_string_doesnt_cast(self):
         # GH#25438 don't cast df['a'] to float64
-        df = DataFrame({"a": [1, 2, 3, np.nan], "b": ["some", "strings", "here", "he"]})
+        df = DataFrame({"a": [1, 2, 3, pd.NA], "b": ["some", "strings", "here", "he"]})
         df["a"] = df["a"].astype("Int64")
 
         res = df.replace("", np.nan)
@@ -682,7 +683,7 @@ class TestDataFrameReplace:
 
     def test_replace_NA_with_None(self):
         # gh-45601
-        df = DataFrame({"value": [42, None]}).astype({"value": "Int64"})
+        df = DataFrame({"value": [42, pd.NA]}, dtype="Int64")
         result = df.replace({pd.NA: None})
         expected = DataFrame({"value": [42, None]}, dtype=object)
         tm.assert_frame_equal(result, expected)
@@ -711,6 +712,13 @@ class TestDataFrameReplace:
                 "col": cat_series,
             }
         )
+        tm.assert_frame_equal(result, expected)
+
+    def test_replace_all_NA(self):
+        # GH#60688
+        df = DataFrame({"ticker": ["#1234#"], "name": [None]})
+        result = df.replace({col: {r"^#": "$"} for col in df.columns}, regex=True)
+        expected = DataFrame({"ticker": ["$1234#"], "name": [None]})
         tm.assert_frame_equal(result, expected)
 
     def test_replace_value_is_none(self, datetime_frame):
@@ -1424,6 +1432,49 @@ class TestDataFrameReplace:
         result = ser.replace("nil", "anything else")
         tm.assert_frame_equal(expected, result)
 
+    @pytest.mark.parametrize(
+        "dtype",
+        [
+            "Float64",
+            pytest.param("float64[pyarrow]", marks=td.skip_if_no("pyarrow")),
+        ],
+    )
+    def test_replace_na_to_nan_nullable_floats(self, dtype, using_nan_is_na):
+        # GH#55127
+        df = DataFrame({0: [1, np.nan, 1], 1: Series([0, pd.NA, 1], dtype=dtype)})
+
+        result = df.replace(pd.NA, np.nan)
+
+        if using_nan_is_na:
+            expected = result
+        else:
+            expected = DataFrame(
+                {0: [1, np.nan, 1], 1: Series([0, np.nan, 1], dtype=dtype)}
+            )
+            assert np.isnan(expected.loc[1, 1])
+
+        tm.assert_frame_equal(result, expected)
+
+    @pytest.mark.parametrize(
+        "dtype",
+        [
+            "Int64",
+            pytest.param("int64[pyarrow]", marks=td.skip_if_no("pyarrow")),
+        ],
+    )
+    def test_replace_nan_nullable_ints(self, dtype, using_nan_is_na):
+        # GH#51237 with nan_is_na=False, replacing NaN should be a no-op here
+        ser = Series([1, 2, None], dtype=dtype)
+
+        result = ser.replace(np.nan, -1)
+
+        if using_nan_is_na:
+            # np.nan is equivalent to pd.NA here
+            expected = Series([1, 2, -1], dtype=dtype)
+        else:
+            expected = ser
+        tm.assert_series_equal(result, expected)
+
 
 class TestDataFrameReplaceRegex:
     @pytest.mark.parametrize(
@@ -1469,21 +1520,24 @@ class TestDataFrameReplaceRegex:
         tm.assert_frame_equal(result, expected)
 
     @pytest.mark.parametrize("regex", [False, True])
-    def test_replace_regex_dtype_frame(self, regex):
+    @pytest.mark.parametrize("value", [1, "1"])
+    def test_replace_regex_dtype_frame(self, regex, value):
         # GH-48644
         df1 = DataFrame({"A": ["0"], "B": ["0"]})
-        expected_df1 = DataFrame({"A": [1], "B": [1]}, dtype=object)
-        result_df1 = df1.replace(to_replace="0", value=1, regex=regex)
+        # When value is an integer, coerce result to object.
+        # When value is a string, infer the correct string dtype.
+        dtype = object if value == 1 else None
+
+        expected_df1 = DataFrame({"A": [value], "B": [value]}, dtype=dtype)
+        result_df1 = df1.replace(to_replace="0", value=value, regex=regex)
         tm.assert_frame_equal(result_df1, expected_df1)
 
         df2 = DataFrame({"A": ["0"], "B": ["1"]})
         if regex:
-            # TODO(infer_string): both string columns get cast to object,
-            # while only needed for column A
-            expected_df2 = DataFrame({"A": [1], "B": ["1"]}, dtype=object)
+            expected_df2 = DataFrame({"A": [value], "B": ["1"]}, dtype=dtype)
         else:
-            expected_df2 = DataFrame({"A": Series([1], dtype=object), "B": ["1"]})
-        result_df2 = df2.replace(to_replace="0", value=1, regex=regex)
+            expected_df2 = DataFrame({"A": Series([value], dtype=dtype), "B": ["1"]})
+        result_df2 = df2.replace(to_replace="0", value=value, regex=regex)
         tm.assert_frame_equal(result_df2, expected_df2)
 
     def test_replace_with_value_also_being_replaced(self):

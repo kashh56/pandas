@@ -11,6 +11,7 @@ from typing import (
 )
 import warnings
 
+from pandas.util._decorators import set_module
 from pandas.util._exceptions import find_stack_level
 from pandas.util._validators import validate_bool_kwarg
 
@@ -174,6 +175,7 @@ def _check_for_locals(expr: str, stack_level: int, parser: str) -> None:
                 raise SyntaxError(msg)
 
 
+@set_module("pandas")
 def eval(
     expr: str | BinOp,  # we leave BinOp out of the docstr bc it isn't for users
     parser: str = "pandas",
@@ -190,8 +192,8 @@ def eval(
 
     .. warning::
 
-        ``eval`` can run arbitrary code which can make you vulnerable to code
-         injection and untrusted data.
+        This function can run arbitrary code which can make you vulnerable to code
+        injection if you pass user input to this function.
 
     Parameters
     ----------
@@ -204,7 +206,7 @@ def eval(
 
         By default, with the numexpr engine, the following operations are supported:
 
-        - Arthimetic operations: ``+``, ``-``, ``*``, ``/``, ``**``, ``%``
+        - Arithmetic operations: ``+``, ``-``, ``*``, ``/``, ``**``, ``%``
         - Boolean operations: ``|`` (or), ``&`` (and), and ``~`` (not)
         - Comparison operators: ``<``, ``<=``, ``==``, ``!=``, ``>=``, ``>``
 
